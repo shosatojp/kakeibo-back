@@ -1,0 +1,13 @@
+{
+    "name": "kakeibo-back",
+    "description": "description",
+    "authors": "Sho Sato",
+    "version": "1.0.0",
+    "dependencies": {
+        "express":"~4.17.1",
+        "sqlite3": "~4.1.1"
+    },
+    "scripts": {
+        "serve":"node src/app.js"
+    }
+}
