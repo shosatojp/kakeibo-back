@@ -61,7 +61,7 @@ app.get('/api/v1/register', async (req, res, next) => {
     if (req.query.userName && req.query.password) {
         const sha = crypto.createHash('sha256');
         sha.update(req.query.password, 'utf8');
-        asyncRun('insert into User values(?,?,?)',
+        await asyncRun('insert into User values(?,?,?)',
             [
                 null,
                 req.query.userName,
@@ -114,42 +114,49 @@ app.get('/api/v1/auth', async (req, res, next) => {
 });
 app.get('/api/v1/logout', async (req, res, next) => {
     if (checkSession(req.query['sessionId'], req.query['userName'])) {
-        const userId = (await getUser(req.query['userName'])).userId;
-        asyncRun('delete from Session where id == ? and userId == ?', [
-            req.query['sessionId'],
-            userId
-        ]).then((data) => {
-            res.status(200);
-            res.end();
-        }).catch(() => {
-            res.status(400);
-            res.end();
-        });
-    } else {
-        res.status(400);
-        res.end();
+        const user = await getUser(req.query['userName']);
+        if (user) {
+            await asyncRun('delete from Session where id == ? and userId == ?', [
+                req.query['sessionId'],
+                user.userId
+            ]).then((data) => {
+                res.status(200);
+                res.end();
+            }).catch((err) => {
+                res.status(400);
+                res.end();
+            });
+        }
     }
+    res.status(400);
+    res.end();
 });
 
 app.get('/api/v1/reflesh', async (req, res, next) => {
     if (checkSession(req.query['sessionId'], req.query['userName'])) {
-        const userId = (await getUser(req.query['userName'])).userId;
-        const del = await asyncRun('delete from Session where id == ? and userId == ?', [
-            req.query['sessionId'],
-            userId
-        ]).then(() => true).catch(() => false);
-        if (del) {
-            const sessionId = generateId(100);
-            const now = new Date().getTime();
-            await asyncRun('insert into Session values(?,?,?)',
-                [
-                    sessionId,
-                    userId,
-                    now
-                ]
-            );
-            res.status(200);
-            res.end(JSON.stringify({ sessionId, expiresOn: now + 60 * 60 * 1000 }));
+        const user = await getUser(req.query['userName']);
+        if (user) {
+            const del = await asyncRun('delete from Session where id == ? and userId == ?', [
+                req.query['sessionId'],
+                user.userId
+            ]).then(() => true).catch(() => false);
+            if (del) {
+                const sessionId = generateId(100);
+                const now = new Date().getTime();
+                await asyncRun('insert into Session values(?,?,?)',
+                    [
+                        sessionId,
+                        user.userId,
+                        now
+                    ]
+                ).then(() => {
+                    res.status(200);
+                    res.end(JSON.stringify({ sessionId, expiresOn: now + 60 * 60 * 1000 }));
+                }).catch(() => {
+                    res.status(400);
+                    res.end();
+                });
+            }
         }
     }
     res.status(400);
@@ -188,7 +195,7 @@ app.use('/api/v1/entry', express.urlencoded({ extended: true }));
 app.post('/api/v1/entry', async (req, res, next) => {
     if (checkSession(req.query['sessionId'], req.query['userName'])) {
         const userId = (await getUser(req.query['userName'])).userId;
-        asyncRun('insert into Entry values(?,?,?,?,?,?,?,?,?)',
+        await asyncRun('insert into Entry values(?,?,?,?,?,?,?,?,?)',
             [
                 null,
                 userId,
@@ -239,7 +246,7 @@ app.get('/api/v1/entry', async (req, res, next) => {
 app.delete('/api/v1/entry', async (req, res, next) => {
     if (checkSession(req.query['sessionId'], req.query['userName'])) {
         if ('id' in req.query) {
-            asyncRun('delete from Entry where id == ?',
+            await asyncRun('delete from Entry where id == ?',
                 [
                     req.query['id']
                 ]
@@ -259,7 +266,7 @@ app.delete('/api/v1/entry', async (req, res, next) => {
 
 app.get('/api/v1/category', async (req, res, next) => {
     if (checkSession(req.query['sessionId'], req.query['userName'])) {
-        asyncAll('select distinct category from Entry where userId == ?',
+        await asyncAll('select distinct category from Entry where userId == ?',
             [
                 (await getUser(req.query['userName'])).userId
             ]).then(data => {
@@ -304,31 +311,30 @@ app.get('/api/v1/available/password', async (req, res, next) => {
 
 app.get('/api/v1/month', async (req, res, next) => {
     if (checkSession(req.query['sessionId'], req.query['userName'])) {
-        const data = await asyncAll('select count(*), sum(price) from Entry where userId == ? and date >= ? and date < ?',
-            [
-                (await getUser(req.query['userName'])).userId,
-                new Date(Number(req.query['year']), Number(req.query['month']) - 1, 1).getTime(),
-                Math.min(new Date(Number(req.query['year']), Number(req.query['month']), 1).getTime(), new Date().getTime()),
-            ]).then(data => {
-                const sum = data[0]['sum(price)'];
-                const count = data[0]['count(*)'];
-                return {
-                    count,
-                    sum,
-                    avg: sum / count,
-                }
-            }).catch(err => null);
-        if (data) {
-            res.status(200);
-            res.end(JSON.stringify(data));
-        } else {
-            res.status(400);
-            res.end();
+        const user = await getUser(req.query['userName']);
+        if (user && req.query['year'] && req.query['month']) {
+            const data = await asyncAll('select count(*), sum(price) from Entry where userId == ? and date >= ? and date < ?',
+                [
+                    user.userId,
+                    new Date(Number(req.query['year']), Number(req.query['month']) - 1, 1).getTime(),
+                    Math.min(new Date(Number(req.query['year']), Number(req.query['month']), 1).getTime(), new Date().getTime()),
+                ]).then(data => {
+                    const sum = data[0]['sum(price)'];
+                    const count = data[0]['count(*)'];
+                    return {
+                        count,
+                        sum,
+                        avg: sum / count,
+                    }
+                }).catch(err => null);
+            if (data) {
+                res.status(200);
+                res.end(JSON.stringify(data));
+            }
         }
-    } else {
-        res.status(400);
-        res.end();
     }
+    res.status(400);
+    res.end();
 });
 
 app.use('/', express.static('../kakeibo-front/dist/kakeibo'));
