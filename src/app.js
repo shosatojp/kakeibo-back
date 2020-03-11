@@ -41,6 +41,9 @@ const asyncGet = asyncFunc((...args) => { db.get(...args) });
         userId integer not null, 
         createdOn int not null
         )`);
+    setInterval(async() => {
+        await asyncRun('delete from Session where createdOn < datetime("now", ,"-1 hours")')
+    }, 60000);
 })();
 
 function generateId(length) {
