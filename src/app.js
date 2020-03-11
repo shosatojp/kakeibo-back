@@ -67,13 +67,12 @@ app.get('/api/v1/register', async (req, res, next) => {
                 req.query.userName,
                 sha.digest('hex')
             ]).then(() => {
+                console.log('new user:', req.query.userName);
                 res.status(200);
                 res.end();
-
             }).catch(() => {
                 res.status(400);
                 res.end();
-
             });
     } else {
         res.status(400);
@@ -92,17 +91,17 @@ app.get('/api/v1/auth', async (req, res, next) => {
             ],
             async (err, rows) => {
                 if (rows.length == 1) {
-                    console.log(rows, req.query.userName);
                     const sessionId = generateId(100);
+                    const now = new Date().getTime();
                     db.run('insert into Session values(?,?,?)',
                         [
                             sessionId,
                             (await getUser(req.query.userName)).userId,
-                            new Date().getTime()
+                            now
                         ]
                     );
                     res.status(200);
-                    res.end(JSON.stringify({ sessionId }));
+                    res.end(JSON.stringify({ sessionId, expiresOn: now + 60 * 60 * 1000 }));
                 } else {
                     res.status(400);
                     res.end();
@@ -114,10 +113,10 @@ app.get('/api/v1/auth', async (req, res, next) => {
     }
 });
 app.get('/api/v1/logout', async (req, res, next) => {
-    if (checkSession(req.headers['sessionid'], req.headers['username'])) {
-        const userId = (await getUser(req.headers['username'])).userId;
+    if (checkSession(req.query['sessionId'], req.query['userName'])) {
+        const userId = (await getUser(req.query['userName'])).userId;
         asyncRun('delete from Session where id == ? and userId == ?', [
-            req.headers['sessionid'],
+            req.query['sessionId'],
             userId
         ]).then((data) => {
             res.status(200);
@@ -133,10 +132,10 @@ app.get('/api/v1/logout', async (req, res, next) => {
 });
 
 app.get('/api/v1/reflesh', async (req, res, next) => {
-    if (checkSession(req.headers['sessionid'], req.headers['username'])) {
-        const userId = (await getUser(req.headers['username'])).userId;
+    if (checkSession(req.query['sessionId'], req.query['userName'])) {
+        const userId = (await getUser(req.query['userName'])).userId;
         const del = await asyncRun('delete from Session where id == ? and userId == ?', [
-            req.headers['sessionid'],
+            req.query['sessionId'],
             userId
         ]).then(() => true).catch(() => false);
         if (del) {
@@ -174,6 +173,8 @@ async function getUserName(userId) {
 }
 
 async function checkSession(userName, sessionId) {
+    if (!(userName && sessionId))
+        return false;
     return asyncGet('select * from Session where userName == ? and id == ? and createdOn > datetime("now","-1 hours")', [userName, sessionId]).then((data) => {
         return !!data;
     }).catch(() => {
@@ -185,8 +186,8 @@ app.use('/api/v1/entry', express.json());
 app.use('/api/v1/entry', express.urlencoded({ extended: true }));
 
 app.post('/api/v1/entry', async (req, res, next) => {
-    if (checkSession(req.headers['sessionid'], req.headers['username'])) {
-        const userId = (await getUser(req.headers['username'])).userId;
+    if (checkSession(req.query['sessionId'], req.query['userName'])) {
+        const userId = (await getUser(req.query['userName'])).userId;
         asyncRun('insert into Entry values(?,?,?,?,?,?,?,?,?)',
             [
                 null,
@@ -214,51 +215,53 @@ app.post('/api/v1/entry', async (req, res, next) => {
 });
 
 app.get('/api/v1/entry', async (req, res, next) => {
-    if (checkSession(req.headers['sessionid'], req.headers['username'])) {
-        asyncAll('select * from Entry where userId == ? and date >= ? and date < ?',
-            [
-                (await getUser(req.headers['username'])).userId,
-                new Date(Number(req.query['year']), Number(req.query['month']) - 1, 1).getTime(),
-                new Date(Number(req.query['year']), Number(req.query['month']), 1).getTime(),
-            ]
-        ).then(data => {
-            res.status(200);
-            res.end(JSON.stringify(data));
-        }).catch(err => {
-            res.status(400);
-            res.end();
-            console.log(err)
-        });
-    } else {
-        res.status(400);
-        res.end();
+    if (checkSession(req.query['sessionId'], req.query['userName'])) {
+        if (req.query['year'] && req.query['month']) {
+            await asyncAll('select * from Entry where userId == ? and date >= ? and date < ?',
+                [
+                    (await getUser(req.query['userName'])).userId,
+                    new Date(Number(req.query['year']), Number(req.query['month']) - 1, 1).getTime(),
+                    new Date(Number(req.query['year']), Number(req.query['month']), 1).getTime(),
+                ]
+            ).then(data => {
+                res.status(200);
+                res.end(JSON.stringify(data));
+            }).catch(err => {
+                console.log(err);
+                res.status(400);
+                res.end();
+            });
+        }
     }
+    res.status(400);
+    res.end();
 });
 app.delete('/api/v1/entry', async (req, res, next) => {
-    if (checkSession(req.headers['sessionid'], req.headers['username'])) {
-        asyncRun('delete from Entry where id == ?',
-            [
-                req.query['id']
-            ]
-        ).then(data => {
-            res.status(200);
-            res.end();
-        }).catch(err => {
-            res.status(400);
-            res.end();
-            console.log(err)
-        });
-    } else {
-        res.status(400);
-        res.end();
+    if (checkSession(req.query['sessionId'], req.query['userName'])) {
+        if ('id' in req.query) {
+            asyncRun('delete from Entry where id == ?',
+                [
+                    req.query['id']
+                ]
+            ).then(data => {
+                res.status(200);
+                res.end();
+            }).catch(err => {
+                res.status(400);
+                res.end();
+                console.log(err)
+            });
+        }
     }
+    res.status(400);
+    res.end();
 });
 
 app.get('/api/v1/category', async (req, res, next) => {
-    if (checkSession(req.headers['sessionid'], req.headers['username'])) {
+    if (checkSession(req.query['sessionId'], req.query['userName'])) {
         asyncAll('select distinct category from Entry where userId == ?',
             [
-                (await getUser(req.headers['username'])).userId
+                (await getUser(req.query['userName'])).userId
             ]).then(data => {
                 if (data) {
                     res.status(200);
@@ -277,14 +280,14 @@ app.get('/api/v1/category', async (req, res, next) => {
     }
 });
 
-app.get('/api/v1/username', async (req, res, next) => {
+app.get('/api/v1/userName', async (req, res, next) => {
     // TODO:チェック
     res.status(200);
     const user = await getUserName(req.query['userId']);
     res.end(JSON.stringify({ userName: user && user.userName }));
 });
 
-app.get('/api/v1/available/username', async (req, res, next) => {
+app.get('/api/v1/available/userName', async (req, res, next) => {
     const user = await getUser(req.query['userName']);
     res.status(200);
     res.end(JSON.stringify({
@@ -300,13 +303,21 @@ app.get('/api/v1/available/password', async (req, res, next) => {
 });
 
 app.get('/api/v1/month', async (req, res, next) => {
-    if (checkSession(req.headers['sessionid'], req.headers['username'])) {
-        const data = await asyncAll('select count(*), sum(price), avg(price) from Entry where userId == ? and date >= ? and date < ?',
+    if (checkSession(req.query['sessionId'], req.query['userName'])) {
+        const data = await asyncAll('select count(*), sum(price) from Entry where userId == ? and date >= ? and date < ?',
             [
-                (await getUser(req.headers['username'])).userId,
+                (await getUser(req.query['userName'])).userId,
                 new Date(Number(req.query['year']), Number(req.query['month']) - 1, 1).getTime(),
                 Math.min(new Date(Number(req.query['year']), Number(req.query['month']), 1).getTime(), new Date().getTime()),
-            ]).then(data => data[0]).catch(err => null);
+            ]).then(data => {
+                const sum = data[0]['sum(price)'];
+                const count = data[0]['count(*)'];
+                return {
+                    count,
+                    sum,
+                    avg: sum / count,
+                }
+            }).catch(err => null);
         if (data) {
             res.status(200);
             res.end(JSON.stringify(data));
