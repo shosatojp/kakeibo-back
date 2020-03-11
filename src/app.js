@@ -32,8 +32,8 @@ const asyncGet = asyncFunc((...args) => { db.get(...args) });
         price integer not null, 
         date integer not null, 
         createdOn integer not null, 
-        category text not null,
-        createdBy integer not null,
+        category text not null, 
+        createdBy integer not null, 
         description text
         )`);
     await asyncExec(`create table if not exists Session (
@@ -41,8 +41,8 @@ const asyncGet = asyncFunc((...args) => { db.get(...args) });
         userId integer not null, 
         createdOn int not null
         )`);
-    setInterval(async() => {
-        await asyncRun('delete from Session where createdOn < datetime("now", ,"-1 hours")')
+    setInterval(async () => {
+        await asyncRun('delete from Session where createdOn < datetime("now", "-1 hours")')
     }, 60000);
 })();
 
@@ -58,44 +58,103 @@ app.listen(8080, () => { });
 
 
 app.get('/api/v1/register', async (req, res, next) => {
-    const sha = crypto.createHash('sha256');
-    db.run('insert into User values(?,?,?)',
-        [
-            null,
-            req.query.userName,
-            sha.digest(req.query.password)
-        ], err => {
-            res.status(200);
-            res.end(JSON.stringify({
-                completed: !err
-            }));
-        });
+    if (req.query.userName && req.query.password) {
+        const sha = crypto.createHash('sha256');
+        sha.update(req.query.password, 'utf8');
+        asyncRun('insert into User values(?,?,?)',
+            [
+                null,
+                req.query.userName,
+                sha.digest('hex')
+            ]).then(() => {
+                res.status(200);
+                res.end();
+
+            }).catch(() => {
+                res.status(400);
+                res.end();
+
+            });
+    } else {
+        res.status(400);
+        res.end();
+    }
 });
 
 app.get('/api/v1/auth', async (req, res, next) => {
-    const sha = crypto.createHash('sha256');
-    db.all('select * from User where userName == ? and passwordHash == ?',
-        [
-            req.query.userName,
-            sha.digest(req.query.password)
-        ],
-        async (err, rows) => {
-            if (rows.length == 1) {
-                const sessionId = generateId(100);
-                db.run('insert into Session values(?,?,?)',
-                    [
-                        sessionId,
-                        (await getUser(req.query.userName)).userId,
-                        new Date().getTime()
-                    ]
-                );
-                res.status(200);
-                res.end(JSON.stringify({ sessionId }));
-            } else {
-                res.status(400);
-                res.end();
-            }
+    if (req.query.userName && req.query.password) {
+        const sha = crypto.createHash('sha256');
+        sha.update(req.query.password, 'utf8');
+        db.all('select * from User where userName == ? and passwordHash == ?',
+            [
+                req.query.userName,
+                sha.digest('hex')
+            ],
+            async (err, rows) => {
+                if (rows.length == 1) {
+                    console.log(rows, req.query.userName);
+                    const sessionId = generateId(100);
+                    db.run('insert into Session values(?,?,?)',
+                        [
+                            sessionId,
+                            (await getUser(req.query.userName)).userId,
+                            new Date().getTime()
+                        ]
+                    );
+                    res.status(200);
+                    res.end(JSON.stringify({ sessionId }));
+                } else {
+                    res.status(400);
+                    res.end();
+                }
+            });
+    } else {
+        res.status(400);
+        res.end();
+    }
+});
+app.get('/api/v1/logout', async (req, res, next) => {
+    if (checkSession(req.headers['sessionid'], req.headers['username'])) {
+        const userId = (await getUser(req.headers['username'])).userId;
+        asyncRun('delete from Session where id == ? and userId == ?', [
+            req.headers['sessionid'],
+            userId
+        ]).then((data) => {
+            res.status(200);
+            res.end();
+        }).catch(() => {
+            res.status(400);
+            res.end();
         });
+    } else {
+        res.status(400);
+        res.end();
+    }
+});
+
+app.get('/api/v1/reflesh', async (req, res, next) => {
+    if (checkSession(req.headers['sessionid'], req.headers['username'])) {
+        const userId = (await getUser(req.headers['username'])).userId;
+        const del = await asyncRun('delete from Session where id == ? and userId == ?', [
+            req.headers['sessionid'],
+            userId
+        ]).then(() => true).catch(() => false);
+        if (del) {
+            const sessionId = generateId(100);
+            const now = new Date().getTime();
+            await asyncRun('insert into Session values(?,?,?)',
+                [
+                    sessionId,
+                    userId,
+                    now
+                ]
+            );
+            res.status(200);
+            res.end(JSON.stringify({ sessionId, expiresOn: now + 60 * 60 * 1000 }));
+        }
+    }
+    res.status(400);
+    res.end();
 });
 
 async function getUser(userName) {
@@ -261,4 +320,4 @@ app.get('/api/v1/month', async (req, res, next) => {
     }
 });
 
-app.use('/', express.static('/home2/y2019/s1910297/repos/kakeibo/dist/kakeibo'));
+app.use('/', express.static('../kakeibo/dist/kakeibo'));
