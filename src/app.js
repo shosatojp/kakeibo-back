@@ -320,4 +320,4 @@ app.get('/api/v1/month', async (req, res, next) => {
     }
 });
 
-app.use('/', express.static('../kakeibo/dist/kakeibo'));
+app.use('/', express.static('../kakeibo-front/dist/kakeibo'));
