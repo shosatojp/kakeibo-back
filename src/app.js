@@ -338,6 +338,8 @@ app.get('/api/v1/month', async (req, res, next) => {
     if (checkSession(req.query['sessionId'], req.query['userName'])) {
         const user = await getUser(req.query['userName']);
         if (user && req.query['year'] && req.query['month']) {
+            const monthHead = new Date(Number(req.query['year']), Number(req.query['month']) - 1, 1).getTime();
+            const nextMonthHead = new Date(Number(req.query['year']), Number(req.query['month']), 1).getTime();
             const data = await asyncAll(`select count(*), sum(price), category
                 from Entry 
                 where userId == ? 
@@ -346,8 +348,8 @@ app.get('/api/v1/month', async (req, res, next) => {
                 group by category`,
                 [
                     user.userId,
-                    new Date(Number(req.query['year']), Number(req.query['month']) - 1, 1).getTime(),
-                    Math.min(new Date(Number(req.query['year']), Number(req.query['month']), 1).getTime(), new Date().getTime()),
+                    monthHead,
+                    Math.min(nextMonthHead, new Date().getTime()),
                 ]).then(data => {
                     const count = data.map(e => e['count(*)']).reduce((a, b) => a + b, 0);
                     const sum = data.map(e => e['sum(price)']).reduce((a, b) => a + b, 0);
@@ -357,7 +359,7 @@ app.get('/api/v1/month', async (req, res, next) => {
                     });
                     return {
                         sum, count,
-                        avg: sum / count,
+                        avg: sum / Math.floor((Math.min(nextMonthHead, new Date().getTime()) - monthHead) / (1000 * 60 * 60 * 24.0)),
                         categories
                     }
                 }).catch(err => {
