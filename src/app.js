@@ -193,7 +193,8 @@ app.use('/api/v1/entry', express.json());
 app.use('/api/v1/entry', express.urlencoded({ extended: true }));
 
 app.post('/api/v1/entry', async (req, res, next) => {
-    if (checkSession(req.query['sessionId'], req.query['userName'])) {
+    if (checkSession(req.query['sessionId'], req.query['userName'])
+        && Number(req.body.price) > 0) {
         const userId = (await getUser(req.query['userName'])).userId;
         await asyncRun('insert into Entry values(?,?,?,?,?,?,?,?,?)',
             [
