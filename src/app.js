@@ -243,6 +243,26 @@ app.get('/api/v1/entry', async (req, res, next) => {
     res.status(400);
     res.end();
 });
+app.get('/api/v1/entry/all', async (req, res, next) => {
+    if (checkSession(req.query['sessionId'], req.query['userName'])) {
+        const user = await getUser(req.query['userName']);
+        if (user) {
+            await asyncAll('select * from Entry where userId == ?',
+                [
+                    user.userId,
+                ]
+            ).then(data => {
+                res.status(200);
+                res.end(JSON.stringify(data));
+            }).catch(err => {
+                res.status(400);
+                res.end();
+            });
+        }
+    }
+    res.status(400);
+    res.end();
+});
 app.delete('/api/v1/entry', async (req, res, next) => {
     if (checkSession(req.query['sessionId'], req.query['userName'])) {
         if ('id' in req.query) {
@@ -264,23 +284,28 @@ app.delete('/api/v1/entry', async (req, res, next) => {
     res.end();
 });
 
+async function getCategories(userId) {
+    return await asyncAll('select distinct category from Entry where userId == ?',
+        [
+            userId
+        ]);
+}
+
 app.get('/api/v1/category', async (req, res, next) => {
     if (checkSession(req.query['sessionId'], req.query['userName'])) {
-        await asyncAll('select distinct category from Entry where userId == ?',
-            [
-                (await getUser(req.query['userName'])).userId
-            ]).then(data => {
-                if (data) {
-                    res.status(200);
-                    res.end(JSON.stringify({ categories: data.map(e => e.category) }));
-                } else {
-                    res.status(400);
-                    res.end();
-                }
-            }).catch(err => {
+        const user = await getUser(req.query['userName']);
+        getCategories(user.userId).then(data => {
+            if (data) {
+                res.status(200);
+                res.end(JSON.stringify({ categories: data.map(e => e.category) }));
+            } else {
                 res.status(400);
                 res.end();
-            });
+            }
+        }).catch(err => {
+            res.status(400);
+            res.end();
+        });
     } else {
         res.status(400);
         res.end();
@@ -313,20 +338,32 @@ app.get('/api/v1/month', async (req, res, next) => {
     if (checkSession(req.query['sessionId'], req.query['userName'])) {
         const user = await getUser(req.query['userName']);
         if (user && req.query['year'] && req.query['month']) {
-            const data = await asyncAll('select count(*), sum(price) from Entry where userId == ? and date >= ? and date < ?',
+            const data = await asyncAll(`select count(*), sum(price), category
+                from Entry 
+                where userId == ? 
+                      and date >= ? 
+                      and date < ? 
+                group by category`,
                 [
                     user.userId,
                     new Date(Number(req.query['year']), Number(req.query['month']) - 1, 1).getTime(),
                     Math.min(new Date(Number(req.query['year']), Number(req.query['month']), 1).getTime(), new Date().getTime()),
                 ]).then(data => {
-                    const sum = data[0]['sum(price)'];
-                    const count = data[0]['count(*)'];
+                    const count = data.map(e => e['count(*)']).reduce((a, b) => a + b, 0);
+                    const sum = data.map(e => e['sum(price)']).reduce((a, b) => a + b, 0);
+                    const categories = {};
+                    data.forEach(e => categories[e.category] = {
+                        sum: e['sum(price)'],
+                    });
                     return {
-                        count,
-                        sum,
+                        sum, count,
                         avg: sum / count,
+                        categories
                     }
-                }).catch(err => null);
+                }).catch(err => {
+                    console.log(err);
+                    return null;
+                });
             if (data) {
                 res.status(200);
                 res.end(JSON.stringify(data));
