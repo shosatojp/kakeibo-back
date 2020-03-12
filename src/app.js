@@ -3,7 +3,7 @@ const sqlite = require('sqlite3');
 const crypto = require('crypto');
 
 const app = express();
-const db = new sqlite.Database('data.db');
+const db = new sqlite.Database('db/data.db');
 
 const asyncFunc = (fn) => {
     return (...args) => {
