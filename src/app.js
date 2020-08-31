@@ -4,6 +4,7 @@ const crypto = require('crypto');
 
 const app = express();
 const db = new sqlite.Database('db/data.db');
+const common = require('./common');
 
 const asyncFunc = (fn) => {
     return (...args) => {
@@ -306,6 +307,24 @@ app.get('/api/v1/category', async (req, res, next) => {
         }).catch(err => {
             res.status(400);
             res.end();
+        });
+    } else {
+        res.status(400);
+        res.end();
+    }
+});
+
+app.post('/api/v1/category', async (req, res, next) => {
+    if (checkSession(req.query['sessionId'], req.query['userName'])) {
+        await getUser(req.query['userName']).then(user => {
+            common.update_dict(user.data, req.body);
+
+            await asyncRun('update User set data = ? where userId == ?', [
+                JSON.stringify(user.data),
+                user.userId,
+            ]);
+        }).then(user => {
+
         });
     } else {
         res.status(400);
